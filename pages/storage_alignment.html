@@ -1,0 +1,521 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>Linux Storage Stack Alignment Calculator</title>
+<link rel="preconnect" href="https://fonts.gstatic.com">
+<link href="https://fonts.googleapis.com/css2?family=Roboto&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Roboto+Mono&display=swap" rel="stylesheet">
+<style type="text/css">
+    body {
+        background-color: #22333b;
+        font-family: 'Roboto', sans-serif;
+    }
+
+    a {
+        color: #d87cac;
+    }
+
+    a:hover {
+        color: #fcaa67;
+    }
+
+    .main {
+        max-width: 800px;
+        margin-left: auto;
+        margin-right: auto;
+    }
+
+    .section {
+        background-color: #fff;
+        border-radius: 1em;
+        padding: 1em;
+        margin-bottom: 1em;
+    }
+
+    .section h2 {
+        margin: 0;
+    }
+
+    .section .description {
+        text-align: justify;
+    }
+
+    .section .inputs {
+        background-color: #e2efff;
+        border-radius: 1em;
+        padding: 1em;
+    }
+
+    .section input[type="text"] {
+        margin-right: 1em;
+    }
+
+    .section textarea {
+        display: block;
+        width: 100%;
+        margin-top: 1em;
+        font-family: 'Roboto Mono', monospace;
+    }
+
+    .section .textdisplay {
+        padding-top: 1em;
+        font-family: 'Roboto Mono', monospace;
+        white-space: pre-wrap;
+    }
+
+    .section button {
+        margin-right: 3px;
+    }
+
+    code {
+        background-color: rgb(235, 235, 235);
+        padding: 2px;
+        word-wrap: break-word;
+    }
+</style>
+</head>
+<body>
+<script>
+(function(){
+    "use strict";
+
+    var $ = document.getElementById.bind(document);
+    var $new = document.createElement.bind(document);
+    var $trigger = function(el, event_name) {
+        el.dispatchEvent(new Event(event_name));
+    };
+
+    var KiB = 1024;
+    var MiB = 1024 * KiB; // 1 048 576 bytes.
+
+    var get_value = function(el_id) {
+        var el = $(el_id);
+        return el ? el.value : null;
+    }
+
+    var clean_number = function(dirty_number) {
+        var m = dirty_number.match(/^\s*(\d+)B?\s*$/);
+        return m ? parseInt(m[1], 10) : null;
+    };
+
+    var get_number = function(el_id) {
+        var val = get_value(el_id);
+        return val !== null ? clean_number(val) : null;
+    };
+
+    var get_alignment = function(val, mod, reverse_order = false, show_factor = false) {
+        var offset = (!reverse_order ? val % mod : mod % val),
+            is_aligned = offset === 0;
+        var factor;
+        if (show_factor) {
+            factor = !reverse_order ? val / mod : mod / val;
+        }
+        return "" + val + " [" + (is_aligned ? "ALIGNED" + (show_factor ? " " + factor + "x" : "") : "NOT ALIGNED! " + offset + " BYTES SHIFTED!") + "]";
+    };
+
+    var get_mib_alignment = function(val, show_factor = false) {
+        var is_aligned = val % MiB === 0;
+        var factor;
+        if (show_factor) {
+            factor = val / MiB;
+        }
+        return "[MiB ALIGNMENT: " + (is_aligned ? "YES" + (show_factor ? " " + factor + "x" : "") : "NO") + "]";
+    };
+
+    var input_sections = [
+
+        {
+            "heading": "Linux Storage Stack Alignment Calculator",
+        },
+
+        {
+            "heading": "Storage (SSD/HDD): Physical Sector Size",
+            "description": "Enter your disk's <em>real</em> (physical) sector size here (usually 4096 or higher). <em>Don't</em> enter its logical or emulated size (which is usually 512).<br /><br />You can check what physical sector size your drive is reporting to the operating system, by running the command <code>cat /sys/block/nvme0n1/queue/physical_block_size</code> (replace <b>nvme0n1</b> with your device name).<br /><br />Alternatively, you can try the command <code>lsblk -o NAME,PHY-SEC</code> to list all devices and their physical sector sizes.<br /><br />You should also try <code>sudo hdparm -I /dev/nvme0n1 | grep Physical</code> (use your own disk name), which requests identification info directly from the drive via an ATA command and may give the true answer if the previous commands didn't. However, many drives don't respond to that command.<br /><br />Almost all consumer-grade SSDs \"lie\" and pretend to use 512 byte sectors for backwards compatibility reasons, which is known as \"<a href=\"https://en.m.wikipedia.org/wiki/Advanced_Format\" target=\"_blank\">Advanced Format 512e</a>\" and means that the disk is emulating 512 byte sectors, but actually uses a larger size internally. This is mainly done because <a href=\"https://docs.microsoft.com/en-us/troubleshoot/windows-server/backup-and-storage/support-policy-4k-sector-hard-drives\" target=\"_blank\">Windows 7 and earlier</a> doesn't support large sector sizes.<br /><br />The majority of SSDs actually use 4K or larger sectors physically. 4K is the most common, but 8K and 16K are also common sizes, particularly for very large drives, to make the physical page count manageable for the SSD's controller.<br /><br />Note that it's completely okay if your drive pretends to use 512 byte sectors, since it just means that the Linux kernel will receive/pre-fetch all the other \"logical sectors\" of the real \"physical sector\" whenever it asks the drive to give it a specific sector. For example, if your SSD uses 4096 byte sectors but pretends to use 512, your Linux kernel will simply receive 8x512 byte sectors (a whole physical sector) every time it asks the drive for one 512 byte sector. And the kernel will cache those subsequent sectors for a while, so that it can provide an instant response in case a program wanted to read the other sectors too.<br /><br />Likewise, when you write data to a disk that is performing \"512e\" emulation, the drive itself knows that it should cache the incoming data and arrange it into coherent sectors on disk, which means that if you're writing a larger data structure (such as a 4096 byte filesystem block), the SSD will wait a while for the other \"emulated\" 512 byte chunks and collect them into a single 4096 byte or larger write. Therefore it doesn't have to invoke any read-modify-write process on a \"partial physical sector\", since all modern SSDs cache incoming data (usually in onboard RAM) and therefore naturally waits for the other emulated 512 byte sectors before it overwrites the whole physical sector.<br /><br />Due to the SSD's write cache, and the operating system's read cache, you <a href=\"http://forum.notebookreview.com/threads/4kn-vs-512e-ssd-sector-size-in-terms-of-performance.835440/\" target=\"_blank\">will not see any performance difference</a> between a 512 byte emulated or a native 4096+ byte sector SSD unless your SSD is capable of massive PCIe 4.0 or higher SSD speeds. The only noticeable difference is that CPU usage for file transfers will be lower with large/native sectors, but unless you're constantly transferring massive amounts of data at high speeds, that really won't matter either. Just think about the fact that the emulation is fast enough that all consumer-grade vendors ship their SSDs in \"512e\" mode by default.<br /><br />However, it's still important that you research the <em>true</em> sector size for partition/LUKS/LVM/filesystem alignment purposes, so that all reads/writes will be aligned to the real, physical sectors!<br /><br />Lastly, note that some SSDs (such as <a href=\"https://www.intel.com/content/www/us/en/support/articles/000006392/memory-and-storage.html\" target=\"_blank\">Intel</a>'s data center drives and <a href=\"https://www.sabrent.com/acronis/ssc/\" target=\"_blank\">Sabrent</a> NVMe drives) have released tools that let you change the physical sector size manually. And even if your vendor hasn't released a tool, you can often use the generic <code>hdparm --set-sector-size</code> tool (which sends the standardized ATA <code>SET SECTOR CONFIGURATION</code> command) to tell the drive to reconfigure itself, but a vendor tool is preferable if one exists, since it may perform some extra steps. Be careful if you decide to reconfigure your physical sector size, because that process will <em>destroy</em> all existing data on your disk since all existing filesystem block references will become invalid/scrambled, and the SSD will most likely reset its own sector mapping table too! If you aren't using a PCIe 4.0 or faster SSD, there's no good reason to change your sector size.",
+            "inputs": [
+                {
+                    "id": "storage_sector_size_dropdown",
+                    "label": "Sector Size:",
+                    "type": "select",
+                    "values": [
+                        { "value": "512" },
+                        { "value": "4096", "text": "4096 (4K)", "default": true },
+                        { "value": "8192", "text": "8192 (8K)" },
+                        { "value": "16384", "text": "16384 (16K)" },
+                        { "value": "32768", "text": "32768 (32K)" },
+                        { "value": "Custom" },
+                    ],
+                    "events": {
+                        "change": function() {
+                            if (this.value === "Custom") { return; }
+                            $("storage_sector_size").value = this.value;
+                        },
+                    },
+                },
+                {
+                    "id": "storage_sector_size",
+                    "type": "text",
+                    "value": "",
+                    "placeholder": "Sector Size (Bytes)",
+                    "events": {
+                        "input": function() {
+                            $("storage_sector_size_dropdown").value = "Custom";
+                        },
+                    },
+                },
+                {
+                    "id": "storage_type_dropdown",
+                    "label": "Storage Type:",
+                    "type": "select",
+                    "values": [
+                        { "value": "HDD", "text": "Hard Disk Drive (HDD)" },
+                        { "value": "SSD", "text": "Solid-State Drive (SSD)", "default": true },
+                    ],
+                },
+            ],
+            "init": function() {
+                $trigger($("storage_sector_size_dropdown"), "change");
+            },
+        },
+
+        {
+            "heading": "Partition: Start Offset and Size",
+            "description": "Run <code>sudo parted /dev/nvme0n1 'unit b print'</code> on your device (replace <b>nvme0n1</b> with your device name), and copy the <code>Start</code> and <code>Size</code> values of your partition. Be careful that you don't accidentally copy the \"End\" value instead.<br /><br />Note that if your partition's start <em>and</em> size are exact multiples of 1 MiB (1 048 576 bytes), then your partition will always be perfectly aligned regardless of your disk's physical sector size. That's why modern partitioning tools such as GParted default to 1 MiB alignment.",
+            "inputs": [
+                {
+                    "id": "partition_start",
+                    "label": "Start:",
+                    "type": "text",
+                    "value": "2097152B",
+                    "placeholder": "Start (Bytes)",
+                },
+                {
+                    "id": "partition_size",
+                    "label": "Size:",
+                    "type": "text",
+                    "value": "33832304640B",
+                    "placeholder": "Size (Bytes)",
+                },
+            ],
+        },
+
+        {
+            "heading": "LUKS (dm-crypt): Payload Offset and Sector Size",
+            "description": "Run <code>sudo cryptsetup luksDump /dev/nvme0n1p3</code> (replace <b>nvme0n1p3</b> with your partition name), and look at the \"Data segment 0\" and copy the <code>offset: X [bytes]</code> and <code>sector: X [bytes]</code> values.<br /><br />The \"offset\" means the location of the first encrypted \"LUKS sector/block\" after the metadata (typically always at a 16 MiB offset regardless of the LUKS \"sector\" size), and the \"sector size\" means the internal size of the individual LUKS blocks.<br /><br />Note that the offset should be either a multiple of your disk's physical sector size, or better yet a multiple of 1 MiB to be universally aligned regardless of disk sector size (same principle as for partition alignment).<br /><br />And regarding sector size, the only reason why LUKS still uses 512 byte sectors by default is for backwards compatibility with old kernels. Your read/write performance is greatly improved if you set LUKS to 4096 byte sectors (the largest size LUKS supports), since this reduces the amount of internal kernel interrupts and block-queue overhead in LUKS compared to its default 512 byte sectors, and gets 8x more work done per instruction/call to hardware accelerators such as AES-NI.<br /><br />Also note that there is no reason to use the smaller sizes even if you have a disk with small physical sectors (such as 512), because modern file systems all use (and recommend) 4096 byte data blocks by default, so anything you write on your filesystems on top of LUKS will always cause 8x512 physical sectors to be written, so even with an old disk you may as well run LUKS in 4096 byte mode too, for enhanced performance.<br /><br />Interestingly, LUKS devices always present themselves to the system as having a physical and logical sector size equal to the block size you configured LUKS with. It ignores the underlying device's specifications.",
+            "inputs": [
+                {
+                    "id": "luks_offset",
+                    "label": "Payload Offset:",
+                    "type": "text",
+                    "value": "16777216",
+                    "placeholder": "Payload Offset (Bytes)",
+                },
+                {
+                    "id": "luks_sector_size",
+                    "label": "Sector Size:",
+                    "type": "text",
+                    "value": "4096",
+                    "placeholder": "Sector Size (Bytes)",
+                },
+            ],
+        },
+
+        {
+            "heading": "LVM: First Physical Extent Offset and Extent Size",
+            "description": "Run <code>sudo pvs -o +pe_start,vg_extent_size,pv_mda_size --units b /dev/mapper/cryptdata</code> (replace <b>cryptdata</b> with your LUKS device name), and copy the <code>1st PE</code> and <code>Ext</code> values.<br /><br />The \"1st PE\" is the location of the first \"physical extent\" after the LVM metadata, and the \"Ext\" is the size of each extent. These values are normally 1 MiB and 4 MiB respectively in LVM's default config, and the \"Ext\" simply controls the smallest possible unit that you can give to a LVM \"logical volume\" when you're dividing up your volume group's space. Note that these will yet again be universally aligned to all normal physical disk sector sizes if they are multiples of 1 MiB.<br /><br />Also note that LVM doesn't let you specify a custom sector size. Instead, the LVM driver simply passes through the physical and logical sector sizes of the real or virtual device it's sitting on. For example, if it's sitting on top of LUKS that has been configured for 4096 byte blocks, then the LVM device will present itself as having 4096 byte physical and logical sectors.",
+            "inputs": [
+                {
+                    "id": "lvm_payload_offset",
+                    "label": "1st PE Offset:",
+                    "type": "text",
+                    "value": "1048576B",
+                    "placeholder": "1st PE Offset (Bytes)",
+                },
+                {
+                    "id": "lvm_extent_size",
+                    "label": "Extent Size:",
+                    "type": "text",
+                    "value": "4194304B",
+                    "placeholder": "Extent Size (Bytes)",
+                },
+            ],
+        },
+
+        {
+            "heading": "Filesystem: Block Size",
+            "description": "Run <code>sudo tune2fs -l /dev/mapper/data-root</code> if you're using Ext4 (replace <b>data-root</b> with the LVM device that contains your filesystem), and copy the <code>Block size</code> value.<br /><br />That's the size of the smallest possible block that a file can allocate for itself on the filesystem, and the ideal value for most people is 4096 (4 KiB) due to the overwhelming amount of large files on modern systems, and the performance benefits of having plenty of data per block. That's why all of the major, modern filesystems use 4096 as their recommended block size (even on disks with small sectors).<br /><br />Note that Ext4 only supports 1K/2K/4K block sizes. This is because Linux requires blocksize &lt;= PAGE_SIZE (which is 4 KiB on x86), so basically all filesystems use blocksize &lt;= 4096 unless they implement support internally for reading/writing partial disk blocks from the page or buffer cache. Therefore, 4K block size is the highest performance and most recommended option for normal files, regardless of what filesystem you use. Even if a filesystem could go higher than that, you won't gain any more performance, since 4K is the sweetspot of performance and disk utilization.<br /><br />Also note that the Ext4 filesystem uses a feature called \"extents\" to efficiently handle metadata for large files by only storing the start block and block count of each contiguous section of a file, rather than listing every individual block. So there's no real benefit to larger block sizes even if Ext4 had been capable of that, and it would just lead to wasted disk space.<br /><br />Lastly, you may have heard the myth that it's \"best to align the filesystem's data inside the SSD's physical erase blocks\" via features such as \"filesystem stride/stripe parameters\", to reduce write amplification. <a href=\"https://superuser.com/a/1635137/1102844\" target=\"_blank\">That is utter nonsense</a>. Modern SSDs since around 2010 use a virtual sector mapping table together with wear leveling, garbage collection and TRIM, which means that individual sectors are spread across the disk and continuously moved. There's absolutely no way to force a modern SSD to place filesystem data sequentially within physical erase blocks, so don't even try. Just ignore any guide that makes such outdated claims. The only things that matters for health on modern SSDs is that you align all data to physical sectors and enable TRIM, since the SSD requires knowledge about dead/useless sectors (via TRIM) for proper garbage collection, performance, and a long and healthy life.",
+            "inputs": [
+                {
+                    "id": "fs_block_size_dropdown",
+                    "label": "Block size:",
+                    "type": "select",
+                    "values": [
+                        { "value": "1024" },
+                        { "value": "2048" },
+                        { "value": "4096", "default": true },
+                        { "value": "Custom" },
+                    ],
+                    "events": {
+                        "change": function() {
+                            if (this.value === "Custom") { return; }
+                            $("fs_block_size").value = this.value;
+                        },
+                    },
+                },
+                {
+                    "id": "fs_block_size",
+                    "type": "text",
+                    "value": "",
+                    "placeholder": "Block Size (Bytes)",
+                    "events": {
+                        "input": function() {
+                            $("fs_block_size_dropdown").value = "Custom";
+                        },
+                    },
+                },
+            ],
+            "init": function() {
+                $trigger($("fs_block_size_dropdown"), "change");
+            },
+        },
+        
+        {
+            "heading": "Result Calculator",
+            "description": "Validate your current settings (above), or display optimal settings for a new system.",
+            "inputs": [
+                {
+                    "type": "button",
+                    "value": "Validate Alignment",
+                    "events": {
+                        "click": function() {
+                            var d = {
+                                "storage_type": get_value("storage_type_dropdown"),
+                                "storage_sector_size": get_number("storage_sector_size"),
+                                "partition_start": get_number("partition_start"),
+                                "partition_size": get_number("partition_size"),
+                                "luks_offset": get_number("luks_offset"),
+                                "luks_sector_size": get_number("luks_sector_size"),
+                                "lvm_payload_offset": get_number("lvm_payload_offset"),
+                                "lvm_extent_size": get_number("lvm_extent_size"),
+                                "fs_block_size": get_number("fs_block_size"),
+                            };
+
+                            var invalid_values = [],
+                                zeroed_values = [];
+                            for (var k in d) {
+                                if (d.hasOwnProperty(k)) {
+                                    if (d[k] === null) {
+                                        invalid_values.push(k);
+                                    } else if (typeof d[k] === "number" && d[k] < 1) {
+                                        zeroed_values.push(k);
+                                    }
+                                }
+                            }
+                            if (invalid_values.length > 0) {
+                                $("result_area").textContent = "Unable to read numeric values from input fields: " + invalid_values.join(", ") + ".";
+                                return;
+                            }
+                            if (zeroed_values.length > 0) {
+                                $("result_area").textContent = "You must provide values for input fields: " + zeroed_values.join(", ") + ".";
+                                return;
+                            }
+
+                            var output_lines = [];
+                            output_lines.push("Storage Type: " + d.storage_type);
+
+                            output_lines.push("Physical Sector Size: " + d.storage_sector_size);
+
+                            output_lines.push("Partition Start: " + get_alignment(d.partition_start, d.storage_sector_size) + " " + get_mib_alignment(d.partition_start));
+                            output_lines.push("Partition Size: " + get_alignment(d.partition_size, d.storage_sector_size) + " " + get_mib_alignment(d.partition_size));
+
+                            output_lines.push("LUKS Payload Offset: " + get_alignment(d.luks_offset, d.storage_sector_size) + " " + get_mib_alignment(d.luks_offset, true));
+                            output_lines.push("LUKS Sector Size: " + get_alignment(d.luks_sector_size, d.storage_sector_size, d.storage_sector_size > d.luks_sector_size, true));
+
+                            output_lines.push("LVM 1st PE Offset: " + get_alignment(d.lvm_payload_offset, d.storage_sector_size) + " " + get_mib_alignment(d.lvm_payload_offset, true));
+                            output_lines.push("LVM Extent Size: " + get_alignment(d.lvm_extent_size, d.storage_sector_size) + " " + get_mib_alignment(d.lvm_extent_size, true));
+
+                            output_lines.push("Filesystem Block Size: " + get_alignment(d.fs_block_size, d.storage_sector_size, d.storage_sector_size > d.fs_block_size, true));
+
+                            $("result_area").textContent = output_lines.join("\n");
+                        },
+                    },
+                },
+                {
+                    "type": "button",
+                    "value": "Display Optimal Setup Guide",
+                    "events": {
+                        "click": function() {
+                            var output_lines = [];
+
+                            output_lines.push("* General Information:\n");
+
+                            output_lines.push("- These instructions guide you through setting up a \"Storage Device &gt; LUKS Encryption &gt; LVM Volume Manager &gt; Ext4 Filesystem\" storage hierarchy, with optimal 1 MiB boundary alignment and performance settings for every layer. If you are only interested in some of these tools, feel free to read through the commands to find the ones that matter to you.");
+                            output_lines.push("- This will create a storage stack that's completely aligned to your disk's physical sectors, regardless of what sector size your disk uses. That's achieved by using universal 1 MiB boundary alignment for all storage layers. All of these tools now do most of that by default, but it's helpful to explicitly specify the alignment arguments just to be sure that it's applied regardless of what tool versions you are using.");
+                            output_lines.push("- It doesn't matter what physical sector size your device uses. We will always be using 4096 byte LUKS blocks and 4096 byte filesystem blocks. That is the optimal choice for performance and modern filesizes, and there are no drawbacks to doing this even if you're using an old storage device with small physical sectors. It doesn't even matter for atomicity purposes (writes followed by instant reads of the same encrypted blocks/filesystem blocks), since the kernel's sector caching takes care of that.");
+                            output_lines.push("- Most of the parameters are explicitly spelled out, to make it clear to the readers.\n");
+
+                            output_lines.push("* Partition Table:\n");
+
+                            output_lines.push("- Use GParted. This tool is strongly recommended because it properly aligns the start and ending of partitions. (If you decide to use other partitioning tools, be sure to read their instructions for how to achieve 1 MiB alignment of the partition's START and END offsets.)");
+                            output_lines.push("- Create a GPT partition table.");
+                            output_lines.push("- Use the \"Align to: MiB\" setting when creating your partitions. This forces the partitions to START and END on precise MiB boundaries.");
+                            output_lines.push("- Create a 512 MiB \"Filesystem: fat32\" partition, which will contain your \"/boot/efi\" for the UEFI bootloader. (Nobody should be using old and fragile BIOS/MBR booting anymore, if their machine is capable of UEFI.)");
+                            output_lines.push("- Create a \"Filesystem: unformatted\" partition, which will house your Linux installation.");
+                            output_lines.push("- If you're unsure about your alignment, use the \"Partition: Start Offset and Size\" alignment checker on this website to check if you've achieved MiB alignment before proceeding.\n")
+
+                            output_lines.push("* Terminal:\n");
+
+                            output_lines.push("# Find the device name for the \"unformatted\" (listed as \"Linux Filesystem\") partition, such as \"/dev/nvme0n1p3\". Use your own partition name from this result in subsequent commands:");
+                            output_lines.push("<b>fdisk -l</b>\n");
+
+                            output_lines.push("# Create an AES-128 LUKS device and ensure that the encrypted payload starts at the nearest 1 MiB (2048 * 512 bytes) boundary after the metadata, and use 4096 byte blocks for performance:");
+                            output_lines.push("<b>cryptsetup --type luks2 --cipher aes-xts-plain64 --key-size 256 --sector-size 4096 --align-payload 2048 luksFormat /dev/nvme0n1p3</b>\n");
+
+                            output_lines.push("# Open the LUKS volume and permanently mark it as \"allow discards (TRIM)\" so that it always opens like that by default, for SSD health purposes:");
+                            output_lines.push("<b>cryptsetup --allow-discards --persistent open /dev/nvme0n1p3 cryptdata</b>\n");
+
+                            output_lines.push("# Create the LVM volume metadata and enforce \"start of payload\" alignment at the nearest 1 MiB boundary after the metadata:");
+                            output_lines.push("<b>pvcreate -ffy --metadatatype lvm2 --dataalignment 1m --dataalignmentoffset 0 /dev/mapper/cryptdata</b>\n");
+
+                            output_lines.push("# Create the LVM volume group and force it to divide the volume into aligned 4 MiB chunks:");
+                            output_lines.push("<b>vgcreate -ffy --physicalextentsize 4m data /dev/mapper/cryptdata</b>\n");
+
+                            output_lines.push("# Create a LVM logical volume using all of the space:");
+                            output_lines.push("<b>lvcreate -y --name root --extents 100%FREE data</b>\n");
+
+                            output_lines.push("# Format as ext4 with 4096 byte (4 KiB) block size:");
+                            output_lines.push("<b>mkfs.ext4 -F -b 4096 /dev/mapper/data-root</b>\n");
+
+                            output_lines.push("# Close the devices:");
+                            output_lines.push("<b>vgchange --activate n data\ncryptsetup close cryptdata</b>\n");
+
+                            $("result_area").innerHTML = output_lines.join("\n\n");
+                        },
+                    },
+                },
+                {
+                    "id": "result_area",
+                    "type": "textdisplay",
+                    "value": "Result...",
+                },
+            ],
+        },
+
+    ];
+
+    var unsavedWork = false; // Whether the user has changed anything.
+    var handleUnsavedWork = function(ev) {
+        if (ev.isTrusted) { // Event was triggered by the user's interaction.
+            unsavedWork = true;
+        }
+    }
+
+    var el_main = $new("div");
+    el_main.setAttribute("class", "main");
+
+    var init_fns = [];
+    input_sections.forEach(function(section){
+        var el_container = $new("div");
+        el_container.setAttribute("class", "section");
+
+        var el_heading = $new("h2");
+        el_heading.textContent = section.heading;
+        el_container.appendChild(el_heading);
+
+        if (section.description) {
+            var el_description = $new("p");
+            el_description.setAttribute("class", "description");
+            el_description.innerHTML = section.description;
+            el_container.appendChild(el_description);
+        }
+
+        if (section.inputs) {
+            var el_inputs = $new("div");
+            el_inputs.setAttribute("class", "inputs");
+            section.inputs.forEach(function(input){
+                var el;
+                switch (input.type) {
+                    case "select":
+                        el = $new("select");
+                        input.values.forEach(function(val){
+                            var opt = $new("option");
+                            opt.setAttribute("value", val.value);
+                            opt.textContent = val.text ? val.text : val.value;
+                            if (val.default) {
+                                opt.setAttribute("selected", "selected");
+                            }
+                            el.appendChild(opt);
+                        });
+                        break;
+                    case "text":
+                        el = $new("input");
+                        el.setAttribute("type", "text");
+                        el.value = input.value;
+                        if (input.placeholder) {
+                            el.setAttribute("placeholder", input.placeholder);
+                        }
+                        break;
+                    case "button":
+                        el = $new("button");
+                        el.setAttribute("type", "button");
+                        el.textContent = input.value;
+                        break;
+                    case "textarea":
+                        el = $new("textarea");
+                        el.value = input.value;
+                        break;
+                    case "textdisplay":
+                        el = $new("div");
+                        el.setAttribute("class", "textdisplay");
+                        if (input.value) {
+                            el.textContent = input.value;
+                        }
+                        break;
+                    default:
+                        console.log("Unsupported input type:", input.type);
+                        return;
+                }
+                if (input.id) {
+                    el.id = input.id;
+                }
+                if (input.events) {
+                    for (var event_name in input.events) {
+                        if (input.events.hasOwnProperty(event_name)) {
+                            el.addEventListener(event_name, input.events[event_name]);
+                        }
+                    }
+                }
+                el.addEventListener("change", handleUnsavedWork); // Detect unsaved work.
+                if (input.label) {
+                    var el_label = $new("label");
+                    el_label.textContent = input.label + " ";
+                    el_label.appendChild(el);
+                    el_inputs.appendChild(el_label);
+                } else{
+                    el_inputs.appendChild(el);
+                }
+            });
+            el_container.appendChild(el_inputs);
+        }
+
+        if (section.init) {
+            init_fns.push(section.init);
+        }
+
+        el_main.appendChild(el_container);
+    });
+
+    document.body.appendChild(el_main);
+    init_fns.forEach(function(fn){
+        fn();
+    });
+
+    window.addEventListener("beforeunload", function(ev) {
+        if (unsavedWork) {
+            ev.preventDefault(); // Required for Firefox.
+            ev.returnValue = "Are you sure you want to leave?";
+        }
+    });
+})();
+</script>
+</body>
+</html>
